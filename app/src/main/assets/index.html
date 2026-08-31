@@ -1,0 +1,176 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>DuoVerse</title><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><style>
+body{margin:0;background:#070912;color:#fff;font-family:system-ui}.wrap{max-width:900px;margin:auto;padding:20px}header{display:flex;justify-content:space-between;padding:15px 0;border-bottom:1px solid #ffffff15}.logo{font-size:24px;font-weight:900}.logo b{color:#9d8cff}.panel{margin-top:16px;padding:18px;background:#101426;border:1px solid #ffffff12;border-radius:18px}.row{display:flex;gap:8px;flex-wrap:wrap}input{flex:1;padding:12px;background:#080b16;color:#fff;border:1px solid #ffffff18;border-radius:10px}button{padding:12px 15px;border:0;border-radius:10px;font-weight:800;cursor:pointer;touch-action:manipulation}button:active{transform:scale(.98)}.p{background:#7c5cff;color:#fff}.s{background:#ffffff10;color:#fff}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}.card{padding:15px;background:#ffffff08;border:1px solid #ffffff12;border-radius:16px}.ico{font-size:25px}.muted{color:#9da3bd;font-size:13px}footer{text-align:center;color:#666d87;font-size:11px;padding:25px}</style></head><body><div class="wrap"><header><div class="logo">Duo<b>Verse</b></div><small id="status">Connecting</small></header><section id="home"><div class="panel"><h1>Play together.</h1><p class="muted">15 game duo online.</p><div class="row"><input id="nick" placeholder="Nickname" maxlength="18"><button class="p" onclick="save()">Save</button></div><p id="msg" class="muted"></p></div><div class="panel"><h3>Online Room</h3><div class="row"><button class="p" onclick="create()">Create Room</button><input id="code" placeholder="6 digit code" maxlength="6"><button class="s" onclick="join()">Join</button></div></div><div id="games" class="grid"></div><footer>© Rey &amp; Luthfie 2026–2027 · DuoVerse</footer></section><section id="room" style="display:none"><div class="panel"><h2 id="rt"></h2><p id="rp" class="muted"></p><div id="players"></div><div id="pick" class="grid"></div><button class="s" onclick="home()">Back</button></div></section></div><script>
+const SUPABASE_URL = "https://twzkqvvdtxixpkxwumys.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3emtxdnZkdHhpeHBreHd1bXlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5Mjg2OTIsImV4cCI6MjEwMzUwNDY5Mn0.W-uQHzkIE9pWuQQu4vqaCdqzH3EqqH3iRKW6PjscJlg";
+
+const $ = id => document.getElementById(id);
+const games = [
+ ["chess","Chess","♟"],["uno","UNO","U"],["connect4","Connect Four","●"],
+ ["ttt","Tic Tac Toe","×"],["pong","Pong Duel","▰"],["snake","Snake Duel","S"],
+ ["bomb","Bomb Arena","B"],["memory","Memory Battle","M"],["aim","Aim Duel","⊙"],
+ ["rps","RPS","R"],["number","Number Guess","N"],["puzzle","Puzzle Race","P"],
+ ["reversi","Reversi","O"],["checkers","Checkers","C"],["battle","Mini Battle","⚔"]
+];
+
+let accessToken = null;
+let playerId = null;
+let roomId = null;
+
+$("games").innerHTML = games.map(g => `
+  <div class="card" onclick="chooseGame('${g[0]}')">
+    <div class="ico">${g[2]}</div><b>${g[1]}</b>
+    <p class="muted">Duo online</p>
+  </div>`).join("");
+
+function setStatus(text, ok=false) {
+  $("status").textContent = text;
+  $("status").style.color = ok ? "#72e6a8" : "#ffb6b6";
+}
+
+function showMsg(text) { $("msg").textContent = text; }
+
+async function api(path, options={}) {
+  const headers = {
+    "apikey": SUPABASE_ANON_KEY,
+    "Content-Type": "application/json",
+    ...(accessToken ? {"Authorization": "Bearer " + accessToken} : {}),
+    ...(options.headers || {})
+  };
+  const res = await fetch(SUPABASE_URL + path, {...options, headers});
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    const message = data?.msg || data?.message || data?.error_description || data?.error || `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function connect() {
+  setStatus("Connecting...");
+  try {
+    const session = JSON.parse(localStorage.getItem("dv_session") || "null");
+    if (session?.access_token) {
+      accessToken = session.access_token;
+      playerId = session.user?.id || null;
+      setStatus("Online", true);
+      return true;
+    }
+
+    // Anonymous sign-in. A failure is shown without freezing the interface.
+    const data = await api("/auth/v1/signup", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+
+    accessToken = data?.access_token || null;
+    playerId = data?.user?.id || null;
+    if (accessToken) {
+      localStorage.setItem("dv_session", JSON.stringify({
+        access_token: accessToken,
+        user: data.user
+      }));
+      setStatus("Online", true);
+      return true;
+    }
+    throw new Error("Supabase tidak mengembalikan session.");
+  } catch (e) {
+    accessToken = null;
+    setStatus("Offline");
+    showMsg("Supabase: " + e.message);
+    return false;
+  }
+}
+
+async function save() {
+  const n = ($("nick").value.trim() || "Player").slice(0,18);
+  localStorage.dvnick = n;
+  $("nick").value = n;
+
+  if (!accessToken) {
+    const ok = await connect();
+    if (!ok) return;
+  }
+
+  try {
+    const data = await api("/rest/v1/profiles", {
+      method: "POST",
+      headers: {"Prefer":"resolution=merge-duplicates,return=minimal"},
+      body: JSON.stringify({id: playerId, username: n})
+    });
+    showMsg("Profile tersimpan: " + n);
+  } catch (e) {
+    showMsg("Gagal menyimpan profile: " + e.message);
+  }
+}
+
+async function create() {
+  if (!accessToken && !(await connect())) return;
+  try {
+    const data = await api("/rest/v1/rpc/create_room", {
+      method:"POST",
+      body: JSON.stringify({p_game_id:"chess"})
+    });
+    roomId = data;
+    await openRoom(roomId);
+  } catch(e) {
+    showMsg("Create Room: " + e.message);
+  }
+}
+
+async function join() {
+  const code = $("code").value.trim().toUpperCase();
+  if (code.length !== 6) { showMsg("Kode room harus 6 karakter."); return; }
+  if (!accessToken && !(await connect())) return;
+  try {
+    const data = await api("/rest/v1/rpc/join_room", {
+      method:"POST",
+      body: JSON.stringify({p_code:code})
+    });
+    roomId = data;
+    await openRoom(roomId);
+  } catch(e) {
+    showMsg("Join Room: " + e.message);
+  }
+}
+
+async function openRoom(id) {
+  try {
+    const room = await api("/rest/v1/rooms?select=*&id=eq." + encodeURIComponent(id) + "&limit=1");
+    if (!room?.length) throw new Error("Room tidak ditemukan.");
+    $("home").style.display="none";
+    $("room").style.display="block";
+    $("rt").textContent="Room " + (room[0].code || "");
+    $("rp").textContent=room[0].status || "waiting";
+
+    $("pick").innerHTML = games.map(g => `
+      <div class="card" onclick="chooseGame('${g[0]}')">
+        <div class="ico">${g[2]}</div><b>${g[1]}</b>
+        <p class="muted">Pilih game</p>
+      </div>`).join("");
+
+    try {
+      const players = await api("/rest/v1/room_players?select=player_number,profiles(username)&room_id=eq." + encodeURIComponent(id) + "&order=player_number");
+      $("players").innerHTML = (players||[]).map(v =>
+        `<p>Player ${v.player_number}: <b>${v.profiles?.username || "Player"}</b></p>`).join("");
+    } catch (_) {
+      $("players").innerHTML = "<p class='muted'>Menunggu pemain lain...</p>";
+    }
+  } catch(e) {
+    showMsg("Room: " + e.message);
+  }
+}
+
+function chooseGame(id) {
+  if (!roomId) {
+    showMsg("Buat atau masuk room dulu untuk memainkan game.");
+    return;
+  }
+  showMsg("Game " + id + " dipilih. Engine game akan dijalankan dari room.");
+}
+
+function home() { $("room").style.display="none"; $("home").style.display="block"; }
+
+$("nick").value = localStorage.dvnick || "Player";
+connect();
+</script></body></html>
