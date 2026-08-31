@@ -111,7 +111,7 @@ async function create() {
       method:"POST",
       body: JSON.stringify({p_game_id:"chess"})
     });
-    roomId = data;
+    roomId = Array.isArray(data) ? data[0]?.id : data?.id;
     await openRoom(roomId);
   } catch(e) {
     showMsg("Create Room: " + e.message);
@@ -127,7 +127,7 @@ async function join() {
       method:"POST",
       body: JSON.stringify({p_code:code})
     });
-    roomId = data;
+    roomId = Array.isArray(data) ? data[0]?.id : data?.id;
     await openRoom(roomId);
   } catch(e) {
     showMsg("Join Room: " + e.message);
